@@ -1,0 +1,53 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**", ".output/**", ".vercel/output/**"],
+      "outputMode": "newest"
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": ["^lint"],
+      "outputs": []
+    },
+    "type-check": {
+      "dependsOn": ["^type-check"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"],
+      "outputMode": "newest"
+    },
+    "clean": {
+      "cache": false
+    }
+  },
+  "env": {
+    "GROQ_API_KEY": true,
+    "OPENROUTER_API_KEY": true,
+    "HUGGINGFACE_API_KEY": true,
+    "GITHUB_TOKEN": true,
+    "MISTRAL_API_KEY": true,
+    "GOOGLE_GEMINI_API_KEY": true,
+    "CEREBRAS_API_KEY": true,
+    "NVIDIA_NIM_API_KEY": true,
+    "COHERE_API_KEY": true,
+    "DEEPSEEK_API_KEY": true,
+    "CLOUDFLARE_ACCOUNT_ID": true,
+    "CLOUDFLARE_API_TOKEN": true,
+    "TOGETHER_AI_API_KEY": true,
+    "ZHIPU_API_KEY": true,
+    "AIML_API_KEY": true,
+    "SAMBANOVA_API_KEY": true,
+    "NEXTAUTH_SECRET": true,
+    "NEXTAUTH_URL": true,
+    "GITHUB_CLIENT_ID": true,
+    "GITHUB_CLIENT_SECRET": true
+  }
+}
