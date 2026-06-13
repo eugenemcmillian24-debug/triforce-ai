@@ -1,41 +1,14 @@
-# wrangler.toml
 name = "triforce-ai"
-main = "apps/worker/src/index.ts"
-compatibility_date = "2024-09-23"
-compatibility_flags = ["nodejs_compat"]
+compatibility_date = "2024-01-01"
+pages_build_output_dir = "./apps/web/.vercel/output/static"
+
+[env.production]
+name = "triforce-ai"
+route = "https://triforce-ai.pages.dev/*"
+
+[[env.production.kv_namespaces]]
+binding = "CACHE"
+id = "your-kv-namespace-id"
 
 [vars]
-NEXTAUTH_URL = "https://triforce-ai.pages.dev"
 ENVIRONMENT = "production"
-
-[[d1_databases]]
-binding = "DB"
-database_name = "triforce-db"
-database_id = "YOUR_D1_DATABASE_ID"
-
-[[kv_namespaces]]
-binding = "RATE_LIMITS"
-id = "YOUR_KV_NAMESPACE_ID"
-
-[[kv_namespaces]]
-binding = "BUILD_CACHE"
-id = "YOUR_BUILD_CACHE_KV_ID"
-
-[[r2_buckets]]
-binding = "ARTIFACTS"
-bucket_name = "triforce-artifacts"
-
-[[queues.producers]]
-binding = "BUILD_QUEUE"
-queue = "triforce-builds"
-
-[[queues.consumers]]
-queue = "triforce-builds"
-max_batch_size = 5
-max_batch_timeout = 30
-
-[ai]
-binding = "AI"
-
-[observability]
-enabled = true
