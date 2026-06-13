@@ -7,14 +7,14 @@ import { callProvider } from './router';
 export const FALLBACK_CASCADE: Record<TaskType, string[]> = {
   'code-generation': ['mistral', 'groq', 'openrouter', 'github-models', 'huggingface'],
   'code-review': ['groq', 'openrouter', 'deepseek', 'mistral', 'cerebras'],
-  'reasoning': ['openrouter', 'nvidia', 'deepseek', 'groq', 'together'],
-  'chat-general': ['groq', 'cerebras', 'mistral', 'openrouter', 'zhipu'],
-  'embedding': ['cohere', 'huggingface', 'cloudflare-ai', 'together'],
-  'image-generation': ['huggingface', 'cloudflare-ai', 'together'],
+  'reasoning': ['openrouter', 'nvidia', 'deepseek', 'groq', 'cerebras'],
+  'chat-general': ['groq', 'cerebras', 'mistral', 'openrouter', 'github-models'],
+  'embedding': ['huggingface', 'cloudflare-ai', 'nvidia'],
+  'image-generation': ['huggingface', 'cloudflare-ai'],
   'audio-transcription': ['groq', 'huggingface'],
   'research': ['google-gemini', 'openrouter', 'nvidia', 'groq'],
   'agi-grade': ['openrouter', 'groq', 'mistral', 'nvidia', 'deepseek', 'cerebras', 'google-gemini'],
-  'singularity-grade': ['openrouter', 'groq', 'mistral', 'nvidia', 'deepseek', 'cerebras', 'google-gemini', 'together', 'cohere', 'zhipu', 'aiml'],
+  'singularity-grade': ['openrouter', 'groq', 'mistral', 'nvidia', 'deepseek', 'cerebras', 'google-gemini', 'sambanova'],
 };
 
 function isRateLimitError(error: unknown): boolean {
