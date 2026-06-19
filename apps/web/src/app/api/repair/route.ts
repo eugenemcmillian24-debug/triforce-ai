@@ -2,106 +2,113 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'edge';
 
-// AI provider configurations
+// Only working providers (verified 2026-06-19)
 const PROVIDERS = {
-  groq: { 
-    baseUrl: 'https://api.groq.com/openai/v1', 
+  groq: {
+    baseUrl: 'https://api.groq.com/openai/v1',
     models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
-    envKey: 'GROQ_API_KEY' 
+    envKey: 'GROQ_API_KEY',
   },
-  cerebras: { 
-    baseUrl: 'https://api.cerebras.ai/v1', 
-    models: ['llama-3.3-70b'],
-    envKey: 'CEREBRAS_API_KEY' 
+  mistral: {
+    baseUrl: 'https://api.mistral.ai/v1',
+    models: ['mistral-small-latest', 'mistral-large-latest'],
+    envKey: 'MISTRAL_API_KEY',
   },
-  deepseek: {
-    baseUrl: 'https://api.deepseek.com/v1',
-    models: ['deepseek-reasoner'],
-    envKey: 'DEEPSEEK_API_KEY'
-  }
-};
+  github: {
+    baseUrl: 'https://models.inference.ai.azure.com',
+    models: ['gpt-4o-mini', 'gpt-4o'],
+    envKey: 'GITHUB_TOKEN',
+  },
+} as const;
+
+type ProviderId = keyof typeof PROVIDERS;
+
+// Provider preference order for each stage (with fallback)
+const PROVIDER_CHAIN: ProviderId[] = ['groq', 'mistral', 'github'];
 
 async function callProvider(
-  provider: keyof typeof PROVIDERS,
-  model: string,
   prompt: string,
-  systemPrompt?: string
-): Promise<string> {
-  const config = PROVIDERS[provider];
-  const apiKey = process.env[config.envKey];
-  
-  if (!apiKey) {
-    throw new Error(`Missing API key for ${provider}`);
-  }
+  systemPrompt?: string,
+  preferredProvider?: ProviderId
+): Promise<{ content: string; provider: ProviderId; model: string }> {
+  const chain: ProviderId[] = preferredProvider
+    ? [preferredProvider, ...PROVIDER_CHAIN.filter(p => p !== preferredProvider)]
+    : PROVIDER_CHAIN;
 
-  const messages = [];
+  const messages: Array<{ role: string; content: string }> = [];
   if (systemPrompt) {
     messages.push({ role: 'system', content: systemPrompt });
   }
   messages.push({ role: 'user', content: prompt });
 
-  const response = await fetch(`${config.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature: 0.7,
-      max_tokens: 4096,
-    }),
-  });
+  let lastError: Error | null = null;
 
-  if (!response.ok) {
-    throw new Error(`${provider} API error: ${response.status}`);
+  for (const providerId of chain) {
+    const config = PROVIDERS[providerId];
+    const apiKey = process.env[config.envKey];
+
+    if (!apiKey) {
+      continue;
+    }
+
+    const model = config.models[0];
+
+    try {
+      const response = await fetch(`${config.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: 0.7,
+          max_tokens: 4096,
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        lastError = new Error(`${providerId} API error: ${response.status} ${errText.slice(0, 200)}`);
+        continue;
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content;
+
+      if (!content) {
+        lastError = new Error(`${providerId} returned empty content`);
+        continue;
+      }
+
+      return { content, provider: providerId, model };
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      continue;
+    }
   }
 
-  const data = await response.json();
-  return data.choices[0].message.content;
+  throw lastError ?? new Error('All providers failed (no API keys configured)');
 }
-
-// Diagnostic stages for repo repair
-const DIAGNOSTIC_STAGES = [
-  { 
-    name: 'Structure Analysis', 
-    provider: 'groq', 
-    model: 'llama-3.3-70b-versatile',
-    systemPrompt: 'You are a code architect analyzing repository structure.'
-  },
-  { 
-    name: 'Deep Assessment', 
-    provider: 'deepseek', 
-    model: 'deepseek-reasoner',
-    systemPrompt: 'You are a senior developer conducting a thorough code review.'
-  },
-  { 
-    name: 'Security Scan', 
-    provider: 'groq', 
-    model: 'llama-3.1-8b-instant',
-    systemPrompt: 'You are a security expert identifying vulnerabilities.'
-  },
-];
 
 export async function POST(request: NextRequest) {
   try {
     const { repoUrl, description, branch = 'main' } = await request.json();
 
     if (!repoUrl) {
-      return NextResponse.json(
-        { error: 'Repository URL required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Repository URL required' }, { status: 400 });
     }
 
-    // Generate report ID
     const reportId = `repair-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-    // Simulate repo analysis (in production, would clone and analyze)
     const repoName = repoUrl.split('/').slice(-2).join('/');
-    
-    // Stage 1: Structure Analysis
+
+    const providersUsed: ProviderId[] = [];
+    const trackProvider = (p: ProviderId) => {
+      if (!providersUsed.includes(p)) providersUsed.push(p);
+    };
+
+    // Stage 1: Structure Analysis (prefer Groq — fast)
     const structurePrompt = `Analyze the repository: ${repoUrl}
 Description: ${description || 'General health check'}
 Branch: ${branch}
@@ -112,14 +119,15 @@ Provide:
 3. Architecture patterns identified
 4. Initial health assessment`;
 
-    const structureAnalysis = await callProvider(
-      'groq',
-      'llama-3.3-70b-versatile',
+    const stage1 = await callProvider(
       structurePrompt,
-      DIAGNOSTIC_STAGES[0]!.systemPrompt || ''
+      'You are a code architect analyzing repository structure.',
+      'groq'
     );
+    trackProvider(stage1.provider);
+    const structureAnalysis = stage1.content;
 
-    // Stage 2: Deep Assessment
+    // Stage 2: Deep Assessment (prefer Mistral — strong reasoning)
     const deepPrompt = `Based on repository: ${repoName}
 
 Previous analysis:
@@ -132,14 +140,15 @@ Provide a detailed code review covering:
 4. Best practice violations
 5. Recommendations for improvement`;
 
-    const deepAnalysis = await callProvider(
-      'deepseek', 
-      'deepseek-reasoner',
+    const stage2 = await callProvider(
       deepPrompt,
-      (DIAGNOSTIC_STAGES[1]?.systemPrompt as string | undefined) || ''
+      'You are a senior developer conducting a thorough code review.',
+      'mistral'
     );
+    trackProvider(stage2.provider);
+    const deepAnalysis = stage2.content;
 
-    // Stage 3: Security Scan
+    // Stage 3: Security Scan (prefer GitHub Models — gpt-4o-mini)
     const securityPrompt = `Repository: ${repoName}
 
 Known issues: ${deepAnalysis}
@@ -151,14 +160,15 @@ Perform a security audit identifying:
 4. Data exposure risks
 5. Recommended fixes`;
 
-    const securityAnalysis = await callProvider(
-      'groq',
-      'llama-3.1-8b-instant',
+    const stage3 = await callProvider(
       securityPrompt,
-      DIAGNOSTIC_STAGES[2]?.systemPrompt || ''
+      'You are a security expert identifying vulnerabilities.',
+      'github'
     );
+    trackProvider(stage3.provider);
+    const securityAnalysis = stage3.content;
 
-    // Generate priority fixes
+    // Stage 4: Priority Fixes (prefer Groq for speed)
     const priorityPrompt = `Based on the following analyses, provide 5 specific, actionable fixes with code examples:
 
 Structure: ${structureAnalysis.slice(0, 500)}
@@ -171,25 +181,21 @@ Format each fix as:
 **Issue**: [Description]
 **Solution**: [Code example or detailed steps]`;
 
-    const priorityFixes = await callProvider(
-      'cerebras',
-      'llama-3.3-70b',
+    const stage4 = await callProvider(
       priorityPrompt,
-      'You are a senior developer providing specific, actionable code fixes.'
+      'You are a senior developer providing specific, actionable code fixes.',
+      'groq'
     );
+    trackProvider(stage4.provider);
+    const priorityFixes = stage4.content;
 
-    // Generate summary
-    const summaryPrompt = `Summarize this repository diagnostic in 2-3 sentences:
+    // Stage 5: Summary (prefer Groq instant — fastest)
+    const summaryPrompt = `Summarize this repository diagnostic in 2-3 sentences:\n\n${priorityFixes}`;
 
-${priorityFixes}`;
+    const stage5 = await callProvider(summaryPrompt, undefined, 'groq');
+    trackProvider(stage5.provider);
+    const summary = stage5.content;
 
-    const summary = await callProvider(
-      'groq',
-      'llama-3.1-8b-instant',
-      summaryPrompt
-    );
-
-    // Return comprehensive report
     return NextResponse.json({
       reportId,
       repoUrl,
@@ -200,29 +206,34 @@ ${priorityFixes}`;
       stages: {
         structure: {
           status: 'completed',
+          provider: stage1.provider,
+          model: stage1.model,
           summary: structureAnalysis.slice(0, 200) + '...',
-          full: structureAnalysis
+          full: structureAnalysis,
         },
         assessment: {
           status: 'completed',
+          provider: stage2.provider,
+          model: stage2.model,
           summary: deepAnalysis.slice(0, 200) + '...',
-          full: deepAnalysis
+          full: deepAnalysis,
         },
         security: {
           status: 'completed',
+          provider: stage3.provider,
+          model: stage3.model,
           summary: securityAnalysis.slice(0, 200) + '...',
-          full: securityAnalysis
-        }
+          full: securityAnalysis,
+        },
       },
       priorityFixes,
       summary,
       metadata: {
-        providersUsed: ['groq', 'deepseek', 'cerebras'],
-        modelsUsed: DIAGNOSTIC_STAGES.map(s => s.model),
-        totalTokens: '~15000'
-      }
+        providersUsed,
+        totalStages: 5,
+        fallbackEnabled: true,
+      },
     });
-
   } catch (error) {
     console.error('Repair error:', error);
     return NextResponse.json(
@@ -237,16 +248,12 @@ export async function GET(request: NextRequest) {
   const reportId = searchParams.get('id');
 
   if (!reportId) {
-    return NextResponse.json(
-      { error: 'Report ID required' },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: 'Report ID required' }, { status: 400 });
   }
 
-  // In production, would fetch from KV/D1
   return NextResponse.json({
     reportId,
     status: 'completed',
-    message: 'Report storage not implemented in demo. Check console for full diagnostic.'
+    message: 'Report storage not implemented in demo. Check response from POST for full diagnostic.',
   });
 }
