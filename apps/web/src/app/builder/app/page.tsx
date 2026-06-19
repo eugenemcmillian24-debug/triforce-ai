@@ -18,6 +18,7 @@ export default function AppBuilderPage() {
 
     setBuilding(true);
     setError(null);
+    setBuildResult(null);
 
     try {
       const response = await fetch('/api/build', {
@@ -60,20 +61,14 @@ export default function AppBuilderPage() {
         </Link>
 
         <div className="mb-8">
-          <h1 className="text-5xl font-bold mb-2">
-            🚀 Full Stack App Builder
-          </h1>
-          <p className="text-xl text-slate-400">
-            Generate complete applications from natural language
-          </p>
+          <h1 className="text-5xl font-bold mb-2">🚀 Full Stack App Builder</h1>
+          <p className="text-xl text-slate-400">Generate complete applications from natural language</p>
         </div>
 
         <div className="grid lg:grid-cols-2 gap-8">
           <div className="space-y-6">
             <div>
-              <label className="block text-sm font-semibold mb-2">
-                Describe your application
-              </label>
+              <label className="block text-sm font-semibold mb-2">Describe your application</label>
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
@@ -83,9 +78,7 @@ export default function AppBuilderPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold mb-2">
-                Framework
-              </label>
+              <label className="block text-sm font-semibold mb-2">Framework</label>
               <div className="grid grid-cols-2 gap-2">
                 {frameworks.map((fw) => (
                   <button
@@ -122,11 +115,7 @@ export default function AppBuilderPage() {
               )}
             </button>
 
-            {error && (
-              <div className="p-4 bg-red-900/30 border border-red-500 rounded-lg">
-                {error}
-              </div>
-            )}
+            {error && <div className="p-4 bg-red-900/30 border border-red-500 rounded-lg">{error}</div>}
           </div>
 
           <div className="space-y-6">
@@ -157,7 +146,7 @@ export default function AppBuilderPage() {
                 <div className="flex items-start gap-3">
                   <span className="text-purple-400 font-mono">4.</span>
                   <div>
-                    <p className="font-medium">Review & Refine</p>
+                    <p className="font-medium">Review &amp; Refine</p>
                     <p className="text-slate-400">AI-powered code review and optimization</p>
                   </div>
                 </div>
@@ -168,20 +157,45 @@ export default function AppBuilderPage() {
               <div className="bg-slate-800 border border-green-500 rounded-lg p-6">
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-2xl">✅</span>
-                  <h3 className="text-lg font-semibold">Build Queued</h3>
+                  <h3 className="text-lg font-semibold">Build Complete</h3>
                 </div>
                 <div className="space-y-2 text-sm">
                   <p><span className="text-slate-400">Build ID:</span> {buildResult.buildId}</p>
-                  <p><span className="text-slate-400">Status:</span> {buildResult.build.status}</p>
-                  <div className="mt-4 pt-4 border-t border-slate-700">
-                    <p className="text-slate-400 mb-2">Steps:</p>
-                    {buildResult.build.steps.map((step: any) => (
-                      <div key={step.id} className="flex items-center gap-2 py-1">
-                        <span className="text-yellow-400">⏳</span>
-                        {step.name}
+                  <p><span className="text-slate-400">Status:</span> {buildResult.status}</p>
+                  {buildResult.stats && (
+                    <div className="grid grid-cols-2 gap-2 mt-3">
+                      <div className="bg-slate-900 rounded p-2">
+                        <div className="text-xs text-slate-400">Tokens</div>
+                        <div className="font-mono">{buildResult.stats.totalTokens}</div>
                       </div>
-                    ))}
-                  </div>
+                      <div className="bg-slate-900 rounded p-2">
+                        <div className="text-xs text-slate-400">Duration</div>
+                        <div className="font-mono">{buildResult.stats.duration}</div>
+                      </div>
+                    </div>
+                  )}
+                  {Array.isArray(buildResult.stages) && (
+                    <div className="mt-4 pt-4 border-t border-slate-700">
+                      <p className="text-slate-400 mb-2">Pipeline Stages:</p>
+                      {buildResult.stages.map((step: any, i: number) => (
+                        <div key={step.name || i} className="flex items-center gap-2 py-1">
+                          <span className="text-yellow-400">⏳</span>
+                          <span className="font-medium">{step.name}</span>
+                          <span className="text-slate-500 text-xs">— {step.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {buildResult.downloadUrl && (
+                    <a
+                      href={buildResult.downloadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block w-full py-3 bg-purple-600 hover:bg-purple-500 rounded-lg text-center font-semibold mt-4"
+                    >
+                      Download Build →
+                    </a>
+                  )}
                 </div>
               </div>
             )}
