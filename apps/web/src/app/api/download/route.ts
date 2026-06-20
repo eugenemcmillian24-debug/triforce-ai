@@ -60,15 +60,8 @@ async function callProvider(prompt: string, systemPrompt: string, preferred?: Pr
   throw new Error('All providers failed');
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    const { prompt, framework = 'nextjs' } = await request.json();
-
-    if (!prompt) {
-      return NextResponse.json({ error: 'Prompt required' }, { status: 400 });
-    }
-
-    const fileGenPrompt = `Generate a complete, production-ready ${framework} project for this app:
+async function generateProjectFiles(prompt: string, framework: string): Promise<Array<{ path: string; content: string }>> {
+  const fileGenPrompt = `Generate a complete, production-ready ${framework} project for this app:
 
 ${prompt}
 
@@ -83,38 +76,77 @@ Output ONLY valid JSON with this structure (no markdown, no explanation):
 Include: package.json, main entry files, at least 3 source files, a README.md.
 Make the code complete and runnable.`;
 
-    const codeJson = await callProvider(
-      fileGenPrompt,
-      'You output ONLY valid JSON. No markdown fences, no explanations.',
-      'groq'
-    );
+  const codeJson = await callProvider(
+    fileGenPrompt,
+    'You output ONLY valid JSON. No markdown fences, no explanations.',
+    'groq'
+  );
 
-    let files: Array<{ path: string; content: string }> = [];
-    try {
-      const cleaned = codeJson.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      const parsed = JSON.parse(cleaned);
-      files = parsed.files || parsed || [];
-    } catch {
-      files = [
-        { path: 'README.md', content: `# Generated App\n\n${prompt}\n\n## AI Output\n\n${codeJson}` },
-        { path: 'prompt.txt', content: prompt },
-      ];
+  let files: Array<{ path: string; content: string }> = [];
+  try {
+    const cleaned = codeJson.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+    files = parsed.files || parsed || [];
+  } catch {
+    files = [
+      { path: 'README.md', content: `# Generated App\n\n${prompt}\n\n## AI Output\n\n${codeJson}` },
+      { path: 'prompt.txt', content: prompt },
+    ];
+  }
+
+  if (!Array.isArray(files)) files = [{ path: 'output.txt', content: String(files) }];
+  return files;
+}
+
+// POST — returns file manifest as JSON (for the download button)
+export async function POST(request: NextRequest) {
+  try {
+    const { prompt, framework = 'nextjs' } = await request.json();
+
+    if (!prompt) {
+      return NextResponse.json({ error: 'Prompt required' }, { status: 400 });
     }
 
-    if (!Array.isArray(files)) files = [{ path: 'output.txt', content: String(files) }];
-
-    const buildId = `build_${Date.now()}`;
-    const shareId = buildId;
-    const shareUrl = `https://triforce-ai.pages.dev/share/${shareId}`;
+    const files = await generateProjectFiles(prompt, framework);
 
     return NextResponse.json({
       success: true,
-      buildId,
-      shareId,
-      shareUrl,
       files,
       fileCount: files.length,
       totalSize: files.reduce((sum, f) => sum + f.content.length, 0),
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Download generation failed' },
+      { status: 500 }
+    );
+  }
+}
+
+// GET — generates files and returns them as a downloadable .txt bundle
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const prompt = searchParams.get('prompt');
+    const framework = searchParams.get('framework') || 'nextjs';
+
+    if (!prompt) {
+      return NextResponse.json({ error: 'Prompt query parameter required' }, { status: 400 });
+    }
+
+    const files = await generateProjectFiles(prompt, framework);
+
+    // Build a real, downloadable text bundle (file separators)
+    const bundle = files
+      .map((f) => `=== FILE: ${f.path} ===\n${f.content}\n`)
+      .join('\n');
+
+    return new Response(bundle, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Disposition': `attachment; filename="triforce-build-${Date.now()}.txt"`,
+        'Cache-Control': 'no-cache',
+      },
     });
   } catch (error) {
     return NextResponse.json(

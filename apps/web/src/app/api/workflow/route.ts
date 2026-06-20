@@ -2,16 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'edge';
 
-// Only working providers (verified 2026-06-19)
 const PROVIDERS = {
   groq: {
     baseUrl: 'https://api.groq.com/openai/v1',
-    models: ['llama-3.3-70b-versatile'],
+    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
     envKey: 'GROQ_API_KEY',
   },
   mistral: {
     baseUrl: 'https://api.mistral.ai/v1',
-    models: ['mistral-small-latest'],
+    models: ['mistral-small-latest', 'mistral-large-latest'],
     envKey: 'MISTRAL_API_KEY',
   },
   github: {
@@ -83,10 +82,44 @@ async function callProvider(
   throw lastError ?? new Error('All providers failed (no API keys configured)');
 }
 
+// Topological sort of nodes based on edges so the pipeline runs in dependency order
+function topoSort(nodes: any[], edges: any[]): any[] {
+  const adj = new Map<string, string[]>();
+  const inDeg = new Map<string, number>();
+  for (const n of nodes) {
+    adj.set(n.id, []);
+    inDeg.set(n.id, 0);
+  }
+  for (const e of edges) {
+    if (adj.has(e.source) && inDeg.has(e.target)) {
+      adj.get(e.source)!.push(e.target);
+      inDeg.set(e.target, (inDeg.get(e.target) || 0) + 1);
+    }
+  }
+  const queue = nodes.filter((n) => (inDeg.get(n.id) || 0) === 0);
+  const sorted: any[] = [];
+  while (queue.length) {
+    const n = queue.shift()!;
+    sorted.push(n);
+    for (const next of adj.get(n.id) || []) {
+      inDeg.set(next, (inDeg.get(next) || 0) - 1);
+      if (inDeg.get(next) === 0) {
+        const node = nodes.find((x) => x.id === next);
+        if (node) queue.push(node);
+      }
+    }
+  }
+  // Append any remaining (cycle-detected) nodes so nothing is dropped
+  for (const n of nodes) {
+    if (!sorted.find((s) => s.id === n.id)) sorted.push(n);
+  }
+  return sorted;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { nodes, edges } = body;
+    const { nodes, edges, automated = true } = body;
 
     if (!nodes || nodes.length === 0) {
       return NextResponse.json(
@@ -96,24 +129,55 @@ export async function POST(request: NextRequest) {
     }
 
     const workflowId = `wf_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const results: Array<{ nodeId: string; type: string; output: string; provider: string }> = [];
     const providersUsed: ProviderId[] = [];
+    const orderedNodes = topoSort(nodes, edges || []);
+    const outputs = new Map<string, string>();
+    const results: Array<{ nodeId: string; type: string; label: string; output: string; provider: string }> = [];
 
-    for (const node of nodes) {
-      const prompt = node.config?.prompt || `Process input for ${node.type} node`;
+    for (const node of orderedNodes) {
+      const nodePrompt = node.data?.config?.prompt || '';
+      const nodeInput = node.data?.config?.input || '';
+      const label = node.data?.label || node.type;
+
+      // Gather upstream outputs from connected edges
+      const upstream = (edges || [])
+        .filter((e: any) => e.target === node.id)
+        .map((e: any) => outputs.get(e.source))
+        .filter(Boolean);
+      const upstreamContext = upstream.length ? `\n\nUpstream data:\n${upstream.join('\n\n')}` : '';
+
+      if (node.type === 'input') {
+        // Input nodes pass their data forward verbatim
+        const inputValue = nodeInput || nodePrompt || '(no input provided)';
+        outputs.set(node.id, inputValue);
+        results.push({ nodeId: node.id, type: 'input', label, output: inputValue, provider: 'n/a' });
+        continue;
+      }
+
+      if (node.type === 'output') {
+        const finalOutput = upstream.join('\n\n') || outputs.get(node.id) || '(no output)';
+        outputs.set(node.id, finalOutput);
+        results.push({ nodeId: node.id, type: 'output', label, output: finalOutput, provider: 'n/a' });
+        continue;
+      }
+
+      // AI node — call a real provider with the node's prompt + upstream context
+      const effectivePrompt = `${nodePrompt || `Process the following input as a ${label} node.`}${upstreamContext}`;
 
       const result = await callProvider(
-        prompt,
-        `You are an AI workflow node of type: ${node.type}. Process the input and return results.`
+        effectivePrompt,
+        `You are an AI workflow node labeled "${label}". Process the input and return clear, useful results.`
       );
 
       if (!providersUsed.includes(result.provider)) {
         providersUsed.push(result.provider);
       }
 
+      outputs.set(node.id, result.content);
       results.push({
         nodeId: node.id,
         type: node.type,
+        label,
         output: result.content,
         provider: result.provider,
       });
@@ -123,6 +187,7 @@ export async function POST(request: NextRequest) {
       success: true,
       workflowId,
       status: 'completed',
+      automated,
       results,
       executedAt: new Date().toISOString(),
       stats: {

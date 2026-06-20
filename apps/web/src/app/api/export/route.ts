@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       format,
+      code: output,
       output,
       filename: `${name}.${fileExt}`,
       mimeType,
