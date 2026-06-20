@@ -1,51 +1,49 @@
-name: Deploy TriForce AI to Cloudflare Pages
+name: Deploy TriForce AI
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  deployments: write
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/web
-
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
       - name: Install dependencies
+        working-directory: apps/web
         run: bun install --frozen-lockfile
 
       - name: Build Next.js
+        working-directory: apps/web
         run: bun run build
-        env:
-          NEXT_TELEMETRY_DISABLED: '1'
 
       - name: Build for Cloudflare Pages
+        working-directory: apps/web
         run: bunx @cloudflare/next-on-pages
         env:
-          NEXT_TELEMETRY_DISABLED: '1'
+          NEXT_TELEMETRY_DISABLED: "1"
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .vercel/output/static --project-name=triforce-ai --branch=main
-          workingDirectory: apps/web
+        working-directory: apps/web
+        run: |
+          bunx wrangler pages deploy .vercel/output/static \
+            --project-name=triforce-ai \
+            --branch=main \
+            --commit-dirty=true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Summary
+        if: always()
         run: |
-          echo "✅ Deployed to https://triforce-ai.pages.dev"
-          echo "Make sure these secrets are set in Cloudflare Pages → Settings → Environment variables (Production):"
-          echo "  GROQ_API_KEY, MISTRAL_API_KEY, GITHUB_TOKEN"
+          echo "## Deployment Result" >> $GITHUB_STEP_SUMMARY
+          echo "Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "Production URL: https://triforce-ai.pages.dev" >> $GITHUB_STEP_SUMMARY
