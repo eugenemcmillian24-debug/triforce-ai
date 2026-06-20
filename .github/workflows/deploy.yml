@@ -1,39 +1,51 @@
-name: Deploy TriForce AI
+name: Deploy TriForce AI to Cloudflare Pages
 
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+
     steps:
       - uses: actions/checkout@v4
-      
-      - uses: actions/setup-node@v4
+
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: '20'
-          cache: 'npm'
-      
+          bun-version: latest
+
       - name: Install dependencies
-        run: npm ci
-      
-      - name: Type check
-        run: npm run type-check
-      
-      - name: Run tests
-        run: npm run test
-      
-      - name: Build
-        run: npm run build
+        run: bun install --frozen-lockfile
+
+      - name: Build Next.js
+        run: bun run build
         env:
-          NODE_ENV: production
-      
+          NEXT_TELEMETRY_DISABLED: '1'
+
+      - name: Build for Cloudflare Pages
+        run: bunx @cloudflare/next-on-pages
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .vercel/output/static --project-name=triforce-ai
+          command: pages deploy .vercel/output/static --project-name=triforce-ai --branch=main
+          workingDirectory: apps/web
+
+      - name: Summary
+        run: |
+          echo "✅ Deployed to https://triforce-ai.pages.dev"
+          echo "Make sure these secrets are set in Cloudflare Pages → Settings → Environment variables (Production):"
+          echo "  GROQ_API_KEY, MISTRAL_API_KEY, GITHUB_TOKEN"
